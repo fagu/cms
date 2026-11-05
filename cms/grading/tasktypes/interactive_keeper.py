@@ -72,7 +72,7 @@ def main():
     solution_commands = config["solution_commands"]
     controller_files = config["controller_files"]
     solution_files = config["solution_files"]
-    controller_wall_limit = config.get("controller_wall_limit")
+    controller_wall_limit = config["controller_wall_limit"]
     controller_time_limit = config.get("controller_time_limit")
     controller_memory_limit = config.get("controller_memory_limit")
     solution_time_limit = config.get("solution_time_limit")
@@ -119,6 +119,8 @@ def main():
     next_process_index = 0
     solution_sandboxes = []
     solution_procs = []
+
+    invalid_command = None
 
     while True:
         line = controller_proc.stdout.readline()
@@ -180,15 +182,18 @@ def main():
             solution_procs.append(sol_proc)
             next_process_index += 1
         else:
-            result = {
-                "success": False,
-                "outcome": 0.0,
-                "text": "Invalid command from controller: " + line,
-                "admin_text": None,
-                "stats": None,
-            }
-            print(json.dumps(result), flush=True)
-            sys.exit(0)
+            # We have received an invalid command from the controller.
+            invalid_command = line
+            break
+            # result = {
+            #     "success": False,
+            #     "outcome": 0.0,
+            #     "text": "Invalid command from controller: " + line,
+            #     "admin_text": None,
+            #     "stats": None,
+            # }
+            # print(json.dumps(result), flush=True)
+            # sys.exit(0)
 
     # Close controller pipes explicitly before result collection
     if controller_proc.stdin:
@@ -229,17 +234,27 @@ def main():
     admin_text = None
     success = True
 
-    try:
-        score, controller_text, admin_text = get_controller_text(controller_sandbox)
-    except Exception as e:
+    if not (success_mgr and box_success_user):
+        success = False
+    elif not evaluation_success_mgr and stats_mgr['exit_status'] == Sandbox.EXIT_TIMEOUT_WALL:
+        outcome = 0.0
+        text = [EVALUATION_MESSAGES.get("walltimeout").message]
+    elif not evaluation_success_mgr or invalid_command is not None:
         success = False
         text = ["Internal error"]
-        admin_text = [f"Internal error: {e}"]
-
-    if not success:
-        pass
-    elif not (success_mgr and box_success_user):
-        success = False
+        # TODO Is admin_text supposed to be an array like this?
+        admin_text = ["Controller failed"]
+        # if controller_text is not None:
+        #     admin_text += controller_text
+        if invalid_command is not None:
+            admin_text += [f"Invalid command: {invalid_command}"]
+    else:
+        try:
+            controller_score, controller_text, admin_text = get_controller_text(controller_sandbox)
+        except Exception as e:
+            success = False
+            text = ["Internal error"]
+            admin_text = [f"Internal error: {e}"]
     else:
         if not evaluation_success_user:
             outcome = 0.0
